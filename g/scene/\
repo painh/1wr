@@ -1,0 +1,896 @@
+var TILE_WIDTH  = 24;
+var TILE_HEIGHT = 24;
+
+var CHAR_WARRIOR	= 0;
+var CHAR_MAGE		= 1;
+var CHAR_THEIF		= 2;
+var CHAR_GOBLIN		= 3;
+var CHAR_COIN		= 4;
+var CHAR_PUB		= 5;
+
+var g_statTable = [ 
+					[	CHAR_WARRIOR,	'전사',		50,	50,	10,	8,	3,	1,	1,	0,	0,	0,	1, [], 0, 0 ],
+					[	CHAR_MAGE,		'마법사',	50,	50,	10,	8,	3,	1,	1,	5,	0,	0,	1, [], 0, 0 ],
+					[	CHAR_THEIF,		'도적',		50,	50,	10,	8,	3,	1,	1,	5,	0,	0,	1, [], 0, 0 ],
+					[	CHAR_GOBLIN,	'고블린',	20,	20,	10,	8,	3,	1,	1,	1,	1,	0,	1, [], 0, 0 ],
+					[	CHAR_COIN	,	'황금',		0,	0,	0,	0,	0,	0,	0,	10,	0,	0,	0, [], 0, 0 ],
+					[	CHAR_PUB,		'선술집',	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0, [], 0, 0 ]
+				];
+var STAT_CHAR_NO			= 0;
+var STAT_CHAR_TYPE_TEXT		= 1;
+var STAT_HP					= 2;
+var STAT_MAX_HP				= 3;
+var STAT_STR				= 4;
+var STAT_DEX				= 5;
+var STAT_MOVE				= 6;
+var STAT_RANGE				= 7;
+var STAT_DEF				= 8;
+var STAT_HAVE_COIN			= 9;
+var STAT_GIVE_EXP			= 10;
+var STAT_EXP				= 11;
+var STAT_LEVEL				= 12;
+var STAT_BASE_COMPONENT		= 13;
+var STAT_MP					= 14;
+var STAT_MAX_MP				= 15;
+
+var g_cameraX = -2;
+
+var BLOCK_DISTANCE = 33;
+
+var COMPONENT_STACK_ABLE		= 0;
+var COMPONENT_SHOP				= 1;
+var COMPONENT_COIN				= 2;
+var COMPONENT_MOVE_LEFT			= 3;
+var COMPONENT_STACK_DIE			= 4;
+var COMPONENT_DEAD_REMOVE		= 5;
+var COMPONENT_INVINCIBLE		= 6;
+var COMPONENT_PUB				= 7;
+var COMPONENT_SWIPE				= 8;
+var COMPONENT_ATTACK_FORWARD	= 9;
+var COMPONENT_ATTACK_BACK		= 10;
+var COMPONENT_MANA_USER			= 11;
+
+var g_componentType = [
+						[COMPONENT_STACK_ABLE, '통과 가능','통과 가능함.'],
+						[COMPONENT_SHOP, '상점','상점을 염'],
+						[COMPONENT_COIN, '황금','골드가 증가함'],
+						[COMPONENT_MOVE_LEFT, '전진(왼쪽)','왼쪽으로 전진함'],
+						[COMPONENT_STACK_DIE, '통과시 사망','통과시 사망함'],
+						[COMPONENT_DEAD_REMOVE, '사망시 삭제','사망시 삭제'],
+						[COMPONENT_INVINCIBLE, '무적','타겟팅 되지 않음'],
+						[COMPONENT_PUB, '선술집','선술집을 염'],
+						[COMPONENT_SWIPE, '후려치기','좌 우의 적도 공격 합니다.'],
+						[COMPONENT_ATTACK_FORWARD, '전방공격','전방의 적을 공격 합니다.'], 
+						[COMPONENT_ATTACK_BACK, '후방공격','후방의 적을 공격합니다.'],
+						[COMPONENT_MANA_USER, '마나 사용자','마력을 사용합니다.'] 
+					];
+
+
+var g_coin = 0;
+var g_gameOver = false;
+
+g_statTable[CHAR_WARRIOR][STAT_BASE_COMPONENT]	= [COMPONENT_ATTACK_FORWARD, COMPONENT_SWIPE];
+g_statTable[CHAR_MAGE][STAT_BASE_COMPONENT]		= [COMPONENT_MANA_USER];
+g_statTable[CHAR_THEIF][STAT_BASE_COMPONENT]	= [COMPONENT_ATTACK_FORWARD, COMPONENT_ATTACK_BACK];
+g_statTable[CHAR_GOBLIN][STAT_BASE_COMPONENT]	= [COMPONENT_MOVE_LEFT, COMPONENT_ATTACK_BACK];
+g_statTable[CHAR_COIN][STAT_BASE_COMPONENT]		= [COMPONENT_STACK_ABLE, COMPONENT_STACK_DIE, COMPONENT_DEAD_REMOVE, COMPONENT_INVINCIBLE];
+g_statTable[CHAR_PUB][STAT_BASE_COMPONENT]		= [COMPONENT_STACK_ABLE, COMPONENT_STACK_DIE, COMPONENT_DEAD_REMOVE, COMPONENT_INVINCIBLE, COMPONENT_PUB];
+
+var Effect = function()
+{
+	this.bornTime = 0;
+	this.font = '8pt Arial';
+	var LIFE_TIME = 2000;
+
+	this.Init = function(x, y, color, str, img)
+	{
+		this.x = x;
+		this.y = y;
+		this.str = str;
+		this.img = img;
+		this.color = color;
+		this.alpha = 1.0;
+		this.bornTime = Renderer.currentTime;
+	}
+
+	this.Update = function()
+	{
+		if(Renderer.currentTime - this.bornTime > LIFE_TIME)
+			return;
+
+		this.alpha = 1.0 - ((Renderer.currentTime - this.bornTime) / LIFE_TIME);
+	}
+
+	this.Render = function()
+	{
+		if(Renderer.currentTime - this.bornTime > LIFE_TIME)
+			return;
+
+		Renderer.SetAlpha(this.alpha);
+
+		if(this.img)
+			Renderer.Img(this.x , this.y, this.img);
+
+		if(this.str)
+		{
+			Renderer.SetFont(this.font);
+			Renderer.SetColor(this.color);
+			Renderer.Text(this.x , this.y, this.str);
+		}
+	}
+}
+
+
+var EffectManager = function()
+{
+	this.list = [];
+	this.effectIndex = 0;
+	this.list.length = 10;
+
+	for(var i = 0; i < this.list.length; ++i)
+		this.list[i] = new Effect();
+
+	this.Add = function(x, y, color, str, img)
+	{
+		this.effectIndex++;
+		if(this.effectIndex >= this.list.length)
+			this.effectIndex = 0; 
+
+		this.list[this.effectIndex].Init(x, y, color, str, img);
+		return this.list[this.effectIndex];
+	} 
+
+	this.Update = function()
+	{
+		for(var i = 0; i < this.list.length; ++i)
+			this.list[i].Update();
+	}
+
+	this.Render = function()
+	{
+		for(var i = 0; i < this.list.length; ++i)
+			this.list[i].Render();
+	}
+
+}
+
+var g_effectManager = new EffectManager();
+var g_imgs = [];
+
+var Obj = function()
+{
+	this.x = 0;
+	this.y = 0;
+	this.width = 1;
+	this.height = 1;
+	this.stats = [];
+
+	this.type = 0;
+	this.portrait = 0;
+	this.component = [];
+	this.targets = [];
+
+	this.isPlayer = false;
+	this.isDead = false;
+	this.isRemoved = false;
+
+	this.Update = function()
+	{
+		if(this.isRemoved)
+			return;
+	}
+
+	this.Render = function()
+	{ 
+		if(this.isRemoved)
+			return;
+
+		if(g_imgs[this.stats[STAT_CHAR_NO]])
+		{
+			Renderer.SetAlpha(1);
+			if(this.isPlayer) 
+				Renderer.Img((this.x - g_cameraX) * TILE_WIDTH, this.y * TILE_HEIGHT, g_imgs[this.stats[STAT_CHAR_NO]]);
+			else
+				Renderer.ImgFlipH((this.x - g_cameraX) * TILE_WIDTH, this.y * TILE_HEIGHT, g_imgs[this.stats[STAT_CHAR_NO]]);
+		}
+
+		if(this.stats[STAT_HP] > 0)
+		{
+			Renderer.SetColor("#ffff00");
+			Renderer.Rect((this.x - g_cameraX) * TILE_WIDTH, this.y * TILE_HEIGHT + TILE_HEIGHT - 3, TILE_WIDTH, 3);
+
+			Renderer.SetColor("#ff0000"); 
+			var width = this.stats[STAT_HP] / this.stats[STAT_MAX_HP] * TILE_WIDTH;
+			Renderer.Rect((this.x - g_cameraX) * TILE_WIDTH, this.y * TILE_HEIGHT + TILE_HEIGHT - 2, width, 1); 
+		}
+
+		if(this.isDead)
+		{ 
+			Renderer.SetAlpha(0.8);
+			Renderer.SetColor("#000000"); 
+			Renderer.Rect((this.x - g_cameraX) * TILE_WIDTH, this.y * TILE_HEIGHT , TILE_WIDTH, TILE_HEIGHT);
+		}
+
+	}
+
+	this.RenderTargets = function()
+	{
+		if(this.isDead)
+			return;
+		
+		Renderer.SetAlpha(0.2); 
+		Renderer.SetColor("#ff0000");
+		var center = this.GetCenter();
+		for(var i in this.targets)
+		{
+			var target = this.targets[i];
+			var tcenter = target.GetCenter();
+
+			Renderer.Line(center.x - g_cameraX * TILE_WIDTH, center.y, tcenter.x - g_cameraX * TILE_WIDTH, tcenter.y); 
+		}
+	}
+		
+	this.GetCenter = function()
+	{
+		var x = this.x * TILE_WIDTH + this.width * TILE_WIDTH/ 2;
+		var y = this.y * TILE_HEIGHT + this.height * TILE_HEIGHT / 2;
+
+		return {x : x, y : y};
+	}
+
+	this.PlayerNextStepAble = function(x, y, objList)
+	{ 
+		var newX = this.x + x;
+		var newY = this.y + y;
+
+		if(newY < 1 || newY >= Renderer.height / TILE_HEIGHT)
+			return false;
+
+
+		for(var i in objList)
+		{
+			var item = objList[i];
+			if(item == this)
+				continue;
+
+			if(item.isDead)
+				continue;
+
+			if(item.checkCompo(COMPONENT_STACK_ABLE))
+				continue;
+			
+			if(item.y == newY && item.x == newX)
+				return false;
+		}
+
+		return true;
+	}
+
+	this.PlayerNextStep = function(x, y)
+	{
+		this.x += x;
+		this.y += y;
+	}
+
+	this.GetDistance = function(obj)
+	{
+		var myCenter = this.GetCenter();
+		var otherCenter = obj.GetCenter();
+
+
+		return Math.sqrt( Math.pow(myCenter.x - otherCenter.x, 2) + Math.pow(myCenter.y - otherCenter.y, 2)) / BLOCK_DISTANCE;
+	}
+
+	this.getTargets = function(list, range)
+	{
+		var myCenter = this.GetCenter();
+		var retList = [];
+
+		for(var i in list)
+		{
+			var item = list[i];
+
+			if(this.GetDistance(item) < range)
+				retList.push(item);
+			
+		}
+
+		return retList;
+	}
+
+	this.checkCompo = function(type)
+	{
+		for(var i in this.component)
+		{
+			var item = this.component[i];
+			if(item.type == type)
+				return item;
+		}
+
+		return null;
+	}
+
+	this.AddCompo = function(type, op)
+	{
+		this.component.push({type:type, op : op});
+	}
+	
+
+	this.AIMove = function(myTeamList, otherTeamList)
+	{
+		var newX = this.x;
+		var newY = this.y;
+
+		if(this.checkCompo(COMPONENT_MOVE_LEFT))
+		{
+			newX -= 1;
+			newY += 0;
+		}
+
+
+		if(newY < 1 || newY >= Renderer.height / TILE_HEIGHT)
+			return false;
+
+		var teamList = [myTeamList, otherTeamList];
+		for( j = 0; j < 2; j++)
+		{
+			var list = teamList[j];
+			for(var i in list)
+			{
+				var item = list[i];
+				if(item == this)
+					continue;
+
+				if(item.checkCompo(COMPONENT_STACK_ABLE))
+					continue;
+
+				if(item.isDead)
+					continue;
+
+				if(item.y == newY && item.x == newX)
+					return false;
+			}
+		}
+
+		this.x = newX;
+		this.y = newY;
+	}
+
+	this.Dead = function(myTeamList, otherTeamList)
+	{
+		if(this.isDead == true)
+			return;
+
+		if(this.stats[STAT_HAVE_COIN] !=  0)
+		{
+			g_coin += this.stats[STAT_HAVE_COIN];
+			var eff = g_effectManager.Add(100, 2, "#ffff00", "+ "+this.stats[STAT_HAVE_COIN]+" coin");
+			eff.font = '16pt Arial';
+		}
+		
+		this.isDead = true;
+
+		if(this.checkCompo(COMPONENT_DEAD_REMOVE))
+			this.isRemoved = true;
+
+		if(this.isPlayer)
+		{
+			var deadCnt = 0;
+			for(var i in myTeamList)
+				if(myTeamList[i].isDead)
+					deadCnt++;
+
+			console.log(deadCnt);
+			if(deadCnt == myTeamList.length)
+			{
+				console.log([deadCnt, myTeamList.length]);
+				console.log('gameover');
+				g_gameOver = true;
+			}
+			
+		}
+
+	}
+
+	this.DoTurn = function(myTeamList, otherTeamList, playerMoved)
+	{ 
+		if(this.isRemoved)
+			return;
+
+		if(this.isDead)
+			return; 
+
+		for(var i in otherTeamList)
+		{ 
+			var item = otherTeamList[i];
+			if(item == this)
+				continue;
+
+			if(item.isDead)
+				continue;
+
+			if(item.y == this.y && item.x == this.x)
+			{
+				if(this.checkCompo(COMPONENT_STACK_DIE))
+				{
+					console.log(this);
+					console.log('stack die');
+					this.Dead(myTeamList, otherTeamList);
+				}
+
+				if(this.checkCompo(COMPONENT_PUB))
+				{
+					console.log(this);
+					console.log('pub');
+					this.Dead(myTeamList, otherTeamList);
+					g_pub.Show();
+				}
+			} 
+		}
+
+		if(this.isDead)
+			return; 
+
+		var m = this.stats;
+		
+		if(this.isPlayer == false && playerMoved == false)
+			this.AIMove(myTeamList, otherTeamList);
+
+		this.targets = this.getTargets(otherTeamList, this.stats[STAT_RANGE]);
+
+		if(this.targets.length <= 0)
+			return;
+		
+		var target = this.targets[0];
+
+		if(!target.checkCompo(COMPONENT_INVINCIBLE))
+		{
+			if( (this.checkCompo(COMPONENT_ATTACK_FORWARD) && this.x < target.x) ||
+				(this.checkCompo(COMPONENT_ATTACK_BACK) && this.x > target.x) ||
+				(this.checkCompo(COMPONENT_SWIPE) && this.x == target.x)
+			)
+			{
+				
+				console.log(this);
+				console.log('attack!');
+				console.log(this);
+				var t = target.stats;
+				var damage = t[STAT_DEF] - m[STAT_STR];
+				t[STAT_HP] = t[STAT_HP] + damage;
+
+				if(t[STAT_HP] < 0)
+				{
+					console.log(this);
+					console.log(target);
+					console.log('hp is zero');
+					target.Dead(otherTeamList, myTeamList);
+				}	
+				if(damage < 0) 
+					g_effectManager.Add((target.x - g_cameraX) * TILE_WIDTH , target.y * TILE_HEIGHT, "#ff0000", damage);
+			}
+		}
+
+	} 
+};
+
+var ObjManager = function()
+{ 
+	this.m_list = [];
+
+	this.Add = function(type, x, y)
+	{
+
+		var obj = new Obj();
+		
+		for(var i in g_statTable)
+		{
+			var item = g_statTable[i];
+			if(item[0] == type)
+				obj.stats = item.slice(); //deep copy
+
+			for(var i in obj.stats[STAT_BASE_COMPONENT])
+				obj.AddCompo(obj.stats[STAT_BASE_COMPONENT][i]);
+		}
+
+		obj.x = x;
+		obj.y = y;
+		this.m_list.push(obj);
+
+		return obj;
+	}
+
+	this.Update = function()
+	{
+		for(var i in this.m_list)
+		{
+			var item = this.m_list[i];
+			item.Update();
+		}
+	}
+
+	this.Render = function()
+	{
+		for(var i in this.m_list)
+		{
+			var item = this.m_list[i];
+			item.Render();
+		}
+
+		for(var i in this.m_list)
+		{
+			var item = this.m_list[i];
+			item.RenderTargets();
+		}
+	}
+
+	this.DoTurn = function(otherManager, playerMoved)
+	{ 
+		for(var i in this.m_list)
+		{
+			var item = this.m_list[i];
+			item.DoTurn(this.m_list, otherManager.m_list, playerMoved);
+		}
+	}
+
+	this.PlayerNextStepAble = function(x, y, otherManager)
+	{
+		var flag = false;
+		for(var i in this.m_list)
+		{
+			var item = this.m_list[i];
+			if(!item.PlayerNextStepAble(x, y, otherManager.m_list))
+				return false;
+		}
+
+		return true;
+	}
+
+	this.PlayerNextStep = function(x, y)
+	{
+		var list = this.m_list;		
+
+		for(var i in list)
+		{
+			var item = list[i];
+			item.PlayerNextStep(x, y);
+		}
+	}
+};
+
+var Btn = function()
+{
+	this.x = 0;
+	this.y = 0;
+	this.width = 50;
+	this.height = 50; 
+	this.clickFunc;
+	this.clicked = false;
+	this.caption = 'button';
+	this.eventReceiver;
+
+	this.Render = function()
+	{
+		Renderer.SetColor("#000000"); 
+		Renderer.SetAlpha(0.8);
+		Renderer.Rect(this.x, this.y, this.width, this.height);
+		Renderer.SetColor("#ffffff"); 
+		Renderer.SetAlpha(1);
+		Renderer.Text(this.x, this.y, this.caption);
+	}
+	
+	this.Update = function()
+	{
+		if( (MouseManager.x < this.x) ||
+			(MouseManager.x >= this.x + this.width) ||
+			(MouseManager.y < this.y) ||
+			(MouseManager.y >= this.y + this.height) )
+		{
+			return;
+		} 
+
+		if(MouseManager.Clicked == true)
+		{
+			this.eventReceiver[this.clickFunc].call(this.eventReceiver, this);
+			MouseManager.Clicked = false;
+		}
+	}
+}
+
+var BtnManager = function()
+{
+	this.list = [];
+	this.visible = true;
+
+	this.Add = function(x, y, width, height, caption, obj, clickFunc)
+	{
+		var btn = new Btn();
+		btn.x = x;
+		btn.y = y;
+		btn.width = width;
+		btn.height = height;
+		btn.caption = caption;
+		btn.eventReceiver = obj;
+		btn.clickFunc = clickFunc; 
+
+		this.list.push(btn);
+	}
+
+	this.Update = function()
+	{
+		if(this.visible == false)
+			return;
+
+		for(var i in this.list)
+		{
+			var item = this.list[i];
+			item.Update();
+		}
+	}
+
+	this.Render = function()
+	{
+		if(this.visible == false)
+			return;
+
+		for(var i in this.list)
+		{
+			var item = this.list[i];
+			item.Render();
+		}
+	}
+} 
+var g_gameUI = new BtnManager();
+//-----------------------------------------------------------------------------------------------------
+
+//-----------------------------------------------------------------------------------------------------
+var Pub = function()
+{
+	this.m_ui = new BtnManager();
+	this.btns = [];
+	this.m_ui.Add(0, 25, 64, 32, '영웅1', this, 'hero');
+	this.m_ui.Add(0, 60, 64, 32, '영웅2', this, 'hero');
+	this.m_ui.Add(0, 100, 64, 32, '영웅3', this, 'hero');
+	this.m_ui.Add(140, 200, 96, 32, '계약', this, 'contract');
+	this.m_ui.Add(240, 200, 64, 32, '취소', this, 'cancel');
+
+	this.m_heroList = [];
+	this.m_selectedHero = 0;
+
+	this.visible = false;
+
+	this.Show = function()
+	{
+		g_gameUI.visible = false;
+		this.visible = true;
+		this.m_selectedHero = 0; 
+		this.m_heroList = [0, 1, 2]; 
+	}
+
+	this.Update = function()
+	{
+		if(this.visible == false)
+			return;
+
+		this.m_ui.Update();
+	}
+	
+	this.Render = function()
+	{ 
+		if(this.visible == false)
+			return;
+
+		Renderer.SetColor("#ffffff");
+		Renderer.SetAlpha(0.9);
+		Renderer.Rect(0, 25, Renderer.width, Renderer.height - 25);
+
+		Renderer.SetColor("#000000");
+		Renderer.SetAlpha(1); 
+		Renderer.SetFont("10pt Arial");
+		var line = 25;
+		var lineTerm = 17;
+		var x = 67;
+		var heroType = this.m_heroList[this.m_selectedHero];
+		//Renderer.Text(x, line, "순서 " + (this.m_selectedHero+1)); line += lineTerm; 
+		//Renderer.Text(x, line, "유형 " + g_statTable[heroType][STAT_CHAR_TYPE_TEXT]); line += lineTerm; 
+		//Renderer.Text(x, line, "특기 "); line += lineTerm; 
+
+		//for(var i in g_statTable[heroType][STAT_BASE_COMPONENT])
+		//{
+		//	var compo = g_statTable[heroType][STAT_BASE_COMPONENT][i];
+		//	var name = g_componentType[compo][1];
+		//	var desc = g_componentType[compo][2];
+		//	Renderer.Text(x, line, name + " : "+ desc); line += lineTerm; 
+		//}
+
+		this.m_ui.Render();
+	}
+
+	this.hero = function(btn)
+	{ 
+		var idx = parseInt(btn.caption.split("Hero")[1]) - 1;
+		this.m_selectedHero = idx;
+		console.log("-------------------------------");
+		console.log(this.m_selectedHero);
+		console.log(this.m_heroList);
+		var heroType = this.m_heroList[this.m_selectedHero];
+		console.log(heroType);
+		var sel = g_statTable[heroType][STAT_CHAR_TYPE_TEXT];
+		console.log(sel);
+	}
+
+	this.cancel = function()
+	{
+		this.visible = false; 
+		g_gameUI.visible = true;
+	}
+}
+var g_pub = new Pub();
+//----------------------------------------------------------------------------------------------------- 
+
+var SceneIngame = function()
+{
+	this.m_playerManager = new ObjManager();
+	this.m_otherManager = new ObjManager();
+
+	var effectList = new Array();
+	var effectListIndex = 0;
+
+	this.Start = function()
+	{
+		g_gameUI.Add(240, 30, 64, 32, '위로', this, "goUp");
+		g_gameUI.Add(240, 70, 64, 32, '아래로', this, "goDown");
+		g_gameUI.Add(240, 200, 64, 32, '앞으로', this, "goNext");
+
+		var chr = this.m_playerManager.Add(CHAR_WARRIOR, 0, 5);
+		chr.isPlayer = true;
+
+		for(var i in g_statTable)
+		{
+			var item = g_statTable[i];
+			var charNum = item[0];
+			g_imgs[charNum] = ImageManager.Register( "./img/char_"+charNum+".png", "char_"+charNum);
+		}
+
+		var ranY = parseInt(randomRange(1, Renderer.height / TILE_HEIGHT));
+		chr = this.m_otherManager.Add(CHAR_PUB, 1, 5);
+		chr.isPlayer = true;
+
+		g_pub.Show();
+	}
+	
+	this.End = function()
+	{
+	} 
+	
+	this.Update = function()
+	{ 
+		if(g_gameOver)
+			return;
+
+		this.m_playerManager.Update();
+		this.m_otherManager.Update();
+		g_gameUI.Update();
+
+		for(var i = 0; i < effectList.length; ++i)
+			effectList[i].Update();
+
+		g_effectManager.Update();
+		g_pub.Update();
+	}
+	
+	this.Render = function()
+	{
+		Renderer.SetAlpha(1.0); 
+		Renderer.SetColor("#bbbbbb"); 
+
+		var ycnt = Math.abs(g_cameraX) % 2;
+		for(var i = 0; i < Renderer.width; i += TILE_WIDTH)
+		{
+			var cnt = (ycnt%2);
+			for(var j = 0; j < Renderer.height; j += TILE_HEIGHT)
+			{
+				if(cnt % 2)
+					Renderer.Rect( i, j, TILE_WIDTH, TILE_HEIGHT);
+
+				++cnt;
+			}
+
+			ycnt++;
+		}	
+
+		this.m_otherManager.Render();
+		this.m_playerManager.Render();
+
+		
+		Renderer.SetAlpha(0.8); 
+		Renderer.SetColor("#000000"); 
+		Renderer.Rect(0, 0, Renderer.width, TILE_HEIGHT);
+
+		Renderer.SetAlpha(1.0); 
+		Renderer.Img(0, 0, g_imgs[CHAR_COIN]);
+		Renderer.SetColor("#ffffff"); 
+		Renderer.SetFont('16pt Arial');
+		Renderer.Text(24, 3, "x " + g_coin);
+
+		g_gameUI.Render();
+		g_effectManager.Render();
+		Renderer.SetAlpha(1.0); 
+
+		g_pub.Render();
+		
+		if(!g_gameOver)
+			return;
+
+
+		Renderer.SetAlpha(0.8); 
+		Renderer.SetColor("#000000"); 
+		Renderer.Rect(0, 0, Renderer.width, Renderer.height);
+
+		Renderer.SetAlpha(1); 
+		Renderer.SetColor("#ff0000"); 
+		Renderer.SetFont('16pt Arial');
+		Renderer.Text(24, 150, "Game Over");
+			
+		Renderer.SetColor("#ffffff"); 
+		Renderer.SetFont('10pt Arial');
+		Renderer.Text(24, 170, "Click to title");
+	} 
+
+	this.doTurn = function(playerMoved)
+	{
+		this.m_playerManager.DoTurn(this.m_otherManager, playerMoved);
+		this.m_otherManager.DoTurn(this.m_playerManager, playerMoved);
+	}
+
+	this.generate = function()
+	{
+		var maxCnt = randomRange(1, 5);
+		for(var i = 0; i < maxCnt;++i)
+		{
+			var ran = randomRange(0, 100);
+			var x = parseInt(g_cameraX + Renderer.width / TILE_WIDTH);
+			if(ran < 10)
+			{ 
+				var ranY = parseInt(randomRange(1, Renderer.height / TILE_HEIGHT));
+				chr = this.m_otherManager.Add(CHAR_COIN, x, ranY);
+				chr.isPlayer = true;
+			}
+			else if(ran < 50)
+			{
+				var ranY = parseInt(randomRange(1, Renderer.height / TILE_HEIGHT));
+				chr = this.m_otherManager.Add(CHAR_GOBLIN, x, ranY);
+			}
+		}
+	}
+
+	this.goUp = function()
+	{
+		if(this.m_playerManager.PlayerNextStepAble(0, -1, this.m_otherManager))
+			this.m_playerManager.PlayerNextStep(0, -1);
+
+		this.generate(); 
+		this.doTurn(false);
+	}
+
+	this.goDown = function()
+	{
+		if(this.m_playerManager.PlayerNextStepAble(0, 1, this.m_otherManager))
+			this.m_playerManager.PlayerNextStep(0, 1);
+
+		this.generate(); 
+		this.doTurn(false);
+	}
+
+	this.goNext = function()
+	{ 
+		if(this.m_playerManager.PlayerNextStepAble(1, 0, this.m_otherManager))
+		{
+			g_cameraX++;
+			this.m_playerManager.PlayerNextStep(1, 0); 
+		}
+
+		this.generate(); 
+		this.doTurn(true); 
+
+	}
+};
